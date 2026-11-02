@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gbekor SHS E-Vote</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#12263f">
+<link rel="icon" href="icon-192.png">
+<style>
+:root{--ink:#12263f;--paper:#f4f6f9;--line:#c5ceda;--ok:#1e7a4f;--bad:#b3261e;--card:#fff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{background:var(--ink);color:#fff;padding:14px 16px}
+header b{font:700 19px Georgia,serif;display:block}
+header span{font-size:13px;opacity:.75}
+main{max-width:520px;margin:0 auto;padding:16px 16px 48px}
+h2{font:700 24px/1.2 Georgia,serif;margin:8px 0 14px}
+h3{font:700 18px Georgia,serif;margin:0 0 8px}
+label{display:block;font-weight:600;margin:12px 0}
+input,select,textarea{display:block;width:100%;margin-top:4px;padding:12px;font:inherit;border:1.5px solid var(--line);border-radius:6px;background:#fff;color:var(--ink)}
+:focus-visible{outline:3px solid #3b82f6;outline-offset:2px}
+button{font:inherit;font-weight:700;padding:13px 18px;border:0;border-radius:6px;background:var(--ink);color:#fff;width:100%;margin-top:10px;cursor:pointer}
+button.alt{background:#fff;color:var(--ink);border:1.5px solid var(--ink)}
+button.ok{background:var(--ok)}
+button:disabled{opacity:.5}
+.err{color:var(--bad);min-height:1.4em;font-weight:600}
+.slip{background:var(--card);border:1.5px solid var(--ink);border-radius:4px;padding:14px;margin:0 0 16px}
+.opt{display:flex;gap:12px;align-items:center;padding:12px 4px;border-top:1px dashed var(--line);margin:0;font-weight:500;cursor:pointer}
+.opt:first-of-type{border-top:0}
+.opt input{width:26px;height:26px;margin:0;accent-color:var(--ok);flex:none}
+.opt.sel{font-weight:700}
+.muted{color:#5a6b80;font-size:14px}
+.bar{height:10px;background:#e3e8ef;border-radius:5px;overflow:hidden;margin:2px 0 10px}
+.bar i{display:block;height:100%;background:var(--ok)}
+.row{display:flex;justify-content:space-between;gap:8px}
+pre{background:#fff;border:1px solid var(--line);padding:10px;overflow:auto;font-size:14px}
+.tick{font-size:64px;color:var(--ok);text-align:center}
+footer{text-align:center;padding:12px}
+footer a{color:#5a6b80;font-size:13px}
+@media print{header,button,footer,.noprint{display:none}}
+</style></head>
+<body>
+<header><b>Gbekor Senior High School</b><span>Student elections</span></header>
+<main id="app"></main>
+<footer><a href="#admin">Election officer</a></footer>
+<script>
+// ====== SET THESE TWO (Supabase > Project Settings > API) ======
+const SB_URL='YOUR_SUPABASE_URL';
+const SB_KEY='YOUR_SUPABASE_ANON_KEY';
+// ================================================================
+const $=s=>document.querySelector(s),app=$('#app');
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let S={};
+async function rpc(fn,a){
+  const r=await fetch(`${SB_URL}/rest/v1/rpc/${fn}`,{method:'POST',headers:{apikey:SB_KEY,'Content-Type':'application/json'},body:JSON.stringify(a)});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(j.message||'Could not reach the server. Check your internet and try again.');
+  return j;
+}
+const view=h=>{app.innerHTML=h;scrollTo(0,0)};
+const err=t=>{const e=$('#err');if(e)e.textContent=t};
+function busy(f,fn){const b=f.querySelector('button:last-of-type')||f;b.disabled=true;return fn().catch(x=>err(x.message)).finally(()=>b.disabled=false)}
+
+/* ---------- Voter ---------- */
+function login(){
+  view(`<h2>Cast your vote</h2><p class="muted">Enter the Student ID and PIN given to you by the election officer.</p>
+  <form id="f"><label>Student ID<input id="sid" autocomplete="off" autocapitalize="characters" required></label>
+  <label>PIN<input id="pin" type="password" inputmode="numeric" autocomplete="off" required></label>
+  <p id="err" class="err" role="alert"></p><button>Open my ballot</button></form>`);
+  $('#f').onsubmit=e=>{e.preventDefault();busy(e.target,async()=>{
+    const sid=$('#sid').value,pin=$('#pin').value;
+    const r=await rpc('get_ballot',{p_student_id:sid,p_pin:pin});
+    if(!r.ok)return err(r.error);
+    S={sid,pin,b:r,ch:{}};ballot();
+  })};
+}
+function ballot(){
+  const b=S.b;
+  if(!b.positions.length)return view('<h2>No positions yet</h2><p>The election officer has not added positions. Try again later.</p>');
+  view(`<h2>Hello, ${esc(b.name)}</h2><p class="muted">Pick one candidate for each position, or choose Abstain.</p>
+  <form id="f">${b.positions.map(p=>`<fieldset class="slip" style="margin:0 0 16px"><legend><h3>${esc(p.title)}</h3></legend>
+    ${p.candidates.map(c=>`<label class="opt"><input type="radio" name="p${p.id}" value="${c.id}">${esc(c.name)}</label>`).join('')}
+    <label class="opt"><input type="radio" name="p${p.id}" value="" checked>Abstain</label></fieldset>`).join('')}
+  <button>Review my choices</button></form>`);
+  $('#f').onsubmit=e=>{e.preventDefault();b.positions.forEach(p=>S.ch[p.id]=document.querySelector(`input[name=p${p.id}]:checked`).value);review()};
+}
+function review(){
+  const rows=S.b.positions.map(p=>{const c=p.candidates.find(c=>String(c.id)===S.ch[p.id]);
+    return `<div class="row slip" style="margin:0 0 8px;padding:10px"><span>${esc(p.title)}</span><b>${c?esc(c.name):'Abstain'}</b></div>`}).join('');
+  view(`<h2>Check your ballot</h2><p class="muted">You can only vote once. After you submit, you cannot change your choices.</p>${rows}
+  <p id="err" class="err" role="alert"></p><button class="ok" id="go">Submit my vote</button><button class="alt" id="back">Go back</button>`);
+  $('#back').onclick=ballot;
+  $('#go').onclick=()=>busy($('#go'),async()=>{
+    const r=await rpc('cast_vote',{p_student_id:S.sid,p_pin:S.pin,p_choices:S.ch});
+    if(!r.ok)return err(r.error);
+    S={};view(`<div class="tick">✔</div><h2 style="text-align:center">Vote recorded</h2><p style="text-align:center">Thank you for voting. You can close this app.</p><button id="again">Next voter</button>`);
+    $('#again').onclick=login;
+  });
+}
+
+/* ---------- Admin ---------- */
+function adminLogin(){
+  view(`<h2>Election officer</h2><form id="f"><label>Admin password<input id="pw" type="password" required></label>
+  <p id="err" class="err" role="alert"></p><button>Sign in</button></form><button class="alt" id="home">Back to voting</button>`);
+  $('#home').onclick=()=>{location.hash='';};
+  $('#f').onsubmit=e=>{e.preventDefault();S.pw=$('#pw').value;busy(e.target,load)};
+}
+async function load(){const s=await rpc('admin_state',{p_pw:S.pw});admin(s)}
+async function act(fn,args){try{await rpc(fn,{p_pw:S.pw,...args});await load()}catch(x){alert(x.message)}}
+function admin(s){
+  const pct=s.total?Math.round(100*s.voted/s.total):0;
+  view(`<h2>Dashboard</h2>
+  <div class="slip"><div class="row"><b>Voting is ${s.voting_open?'OPEN':'CLOSED'}</b><span>${s.voted} of ${s.total} voted</span></div>
+  <div class="bar"><i style="width:${pct}%"></i></div>
+  <button id="tog" class="${s.voting_open?'':'ok'}">${s.voting_open?'Close voting':'Open voting'}</button></div>
+  <h2>Results</h2>${s.positions.map(p=>{const m=Math.max(1,...p.candidates.map(c=>c.votes));
+    return `<div class="slip"><h3>${esc(p.title)}</h3>${p.candidates.map(c=>`<div class="row"><span>${esc(c.name)}</span><b>${c.votes}</b></div><div class="bar"><i style="width:${100*c.votes/m}%"></i></div>`).join('')||'<p class="muted">No candidates yet.</p>'}<p class="muted">Abstained: ${p.abstain}</p></div>`}).join('')||'<p class="muted">Add a position to begin.</p>'}
+  <h2>Set up</h2>
+  <form id="fp" class="slip"><label>New position<input id="pt" placeholder="e.g. Senior Prefect" required></label><button>Add position</button></form>
+  <form id="fc" class="slip"><label>Position<select id="cp">${s.positions.map(p=>`<option value="${p.id}">${esc(p.title)}</option>`).join('')}</select></label>
+  <label>Candidate name<input id="cn" required></label><button>Add candidate</button></form>
+  <form id="fv" class="slip"><label>Voters, one per line: Student ID, Full name<textarea id="vl" rows="5" placeholder="GSHS001, Ama Mensah"></textarea></label>
+  <button>Create voters and PINs</button><p class="muted">Re-adding an ID gives a new PIN and unlocks the account. It never lets someone vote twice.</p></form>
+  <div id="out"></div><button class="alt" id="out2">Sign out</button>`);
+  $('#tog').onclick=()=>act('admin_set_open',{p_open:!s.voting_open});
+  $('#fp').onsubmit=e=>{e.preventDefault();act('admin_add_position',{p_title:$('#pt').value})};
+  $('#fc').onsubmit=e=>{e.preventDefault();act('admin_add_candidate',{p_position_id:+$('#cp').value,p_name:$('#cn').value})};
+  $('#out2').onclick=()=>{S={};location.hash=''};
+  $('#fv').onsubmit=async e=>{e.preventDefault();
+    const list=$('#vl').value.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{const i=l.indexOf(',');return{student_id:l.slice(0,i<0?undefined:i).trim(),name:i<0?l:l.slice(i+1).trim(),pin:String(100000+crypto.getRandomValues(new Uint32Array(1))[0]%900000)}});
+    if(!list.length)return;
+    try{await rpc('admin_add_voters',{p_pw:S.pw,p_voters:list});
+      $('#out').innerHTML=`<div class="slip"><h3>PINs (shown once)</h3><pre>${esc(list.map(v=>`${v.student_id.toUpperCase()}  ${v.pin}  ${v.name}`).join('\n'))}</pre><button class="alt noprint" onclick="print()">Print</button></div>`;
+      $('#vl').value='';
+    }catch(x){alert(x.message)}};
+}
+
+/* ---------- Routing + PWA ---------- */
+function route(){location.hash==='#admin'?adminLogin():login()}
+addEventListener('hashchange',route);route();
+if('serviceWorker'in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js'));
+</script></body></html>
